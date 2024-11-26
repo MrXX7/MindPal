@@ -10,6 +10,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var userInput = ""
     @State private var aiResponse = "Hello! How can I help you?"
+    @State private var isLoading = false
 
     var body: some View {
         VStack {
@@ -29,12 +30,17 @@ struct ContentView: View {
                     .background(Color.gray.opacity(0.1))
                     .cornerRadius(10)
 
-                Button(action: sendMessage) {
-                    Text("Send")
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                if isLoading {
+                    ProgressView()
+                        .padding(.leading, 10)
+                } else {
+                    Button(action: sendMessage) {
+                        Text("Send")
+                            .padding()
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
                 }
             }
             .padding()
@@ -43,22 +49,58 @@ struct ContentView: View {
     }
 
     func sendMessage() {
-        // The user sends a message, and the AI provides a response
-        aiResponse = getAIResponse(for: userInput)
-        userInput = ""
+        guard !userInput.isEmpty else { return }
+        isLoading = true
+        callOpenAIAPI(prompt: userInput) { response in
+            DispatchQueue.main.async {
+                aiResponse = response ?? "Something went wrong. Please try again."
+                userInput = ""
+                isLoading = false
+            }
+        }
     }
 }
-import NaturalLanguage
 
-func getAIResponse(for input: String) -> String {
-    let text = input.lowercased()
+func callOpenAIAPI(prompt: String, completion: @escaping (String?) -> Void) {
+    let apiKey = "YOUR_API_KEY_HERE"
+    let url = URL(string: "https://api.openai.com/v1/chat/completions")!
 
-    if text.contains("hello") {
-        return "Hello! How are you?"
-    } else if text.contains("how are you") {
-        return "I am just a virtual friend, but I'm doing great!"
-    } else {
-        return "I didn't quite understand that. Could you ask something else?"
+    let headers = [
+        "Content-Type": "application/json",
+        "Authorization": "Bearer \(apiKey)"
+    ]
+
+    let body: [String: Any] = [
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            ["role": "system", "content": "You are a helpful assistant."],
+            ["role": "user", "content": prompt]
+        ],
+        "max_tokens": 150
+    ]
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.allHTTPHeaderFields = headers
+    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+    let task = URLSession.shared.dataTask(with: request) { data, response, error in
+        guard let data = data, error == nil else {
+            completion(nil)
+            return
+        }
+
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let choices = json["choices"] as? [[String: Any]],
+           let message = choices.first?["message"] as? [String: Any],
+           let content = message["content"] as? String {
+            completion(content.trimmingCharacters(in: .whitespacesAndNewlines))
+        } else {
+            completion(nil)
+        }
     }
+
+    task.resume()
 }
+
 
